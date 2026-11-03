@@ -1,0 +1,60 @@
+name: Shadow   # load-bearing: auto-approve.yml keys on this exact name
+# To upgrade the engine, bump the ref in BOTH `uses:` and `shadow_ref` below
+# (GitHub forbids expressions in `uses:`, so they can't share a variable).
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request_target:  # base-branch checkout only; never add ref: (see SECURITY A1)
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue/PR number to process"
+        required: true
+      dry_run:
+        description: "Dry run (no writes)"
+        type: boolean
+        default: true
+
+# Union of the reusable workflow's nested-job permissions; a caller must grant
+# these or the call fails at startup (each nested job still narrows its own set).
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  issues: write
+
+# inputs.issue_number fallback: workflow_dispatch has no event PR/issue number.
+concurrency:
+  group: bot-${{ github.event.issue.number || github.event.pull_request.number || inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  shadow:
+    # Avoid self-triggered loops (bot's own comments) and double-reviewing a PR
+    # from both issue_comment and pull_request_target; dispatch is always manual.
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.actor != 'github-actions[bot]' &&
+       (github.event.issue.pull_request == null || github.event_name == 'pull_request_target'))
+    uses: sudsali/shadow/.github/workflows/shadow-review.yml@ed31ed7e30ef81be82d7b8b756b626f876036d73 # v1.7
+    with:
+      pr_number: ${{ inputs.issue_number }}
+      dry_run: ${{ inputs.dry_run && 'true' || 'false' }}
+      shadow_ref: ed31ed7e30ef81be82d7b8b756b626f876036d73 # v1.7
+      aws_region: us-east-1
+      prompt_sm_prefix: deequ-bot
+    secrets:
+      AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+      GUARDRAIL_ID: ${{ secrets.GUARDRAIL_ID }}
+      GUARDRAIL_VERSION: ${{ secrets.GUARDRAIL_VERSION }}
+      KB_S3_BUCKET: ${{ secrets.KB_S3_BUCKET }}
+      KB_S3_KEY: ${{ secrets.KB_S3_KEY }}
+      BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+      # Repo variables (not secrets); empty falls back to engine defaults.
+      BEDROCK_REPORTER_MODEL_ID: ${{ vars.BEDROCK_REPORTER_MODEL_ID }}
+      BEDROCK_CRITIC_MODEL_ID: ${{ vars.BEDROCK_CRITIC_MODEL_ID }}
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
